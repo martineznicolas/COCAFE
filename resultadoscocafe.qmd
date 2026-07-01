@@ -1,0 +1,1998 @@
+---
+title: "COCAFE"
+format:
+  html:
+    theme: journal
+    highlight-style: github   # estilo del resaltado de código
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    toc-title: "Contenido"    # título del TOC en español
+    number-sections: true     # numera las secciones automáticamente
+    code-fold: true
+    code-summary: "Ver código"
+    code-tools: true          # botón para mostrar/ocultar todo el código
+    fig-cap-location: bottom  # pie de figura abajo
+    embed-resources: true
+    smooth-scroll: true
+    page-layout: article      # centra el contenido con márgenes
+editor: visual
+execute:
+  warning: false
+  message: false
+---
+
+## Elaborado por:
+
+| *Nicolás Martínez Ramos*                                                     |
+|------------------------------------------------------------------------|
+| ***Psicólogo, Esp. medición y evaluación psicológica y mg. bioestadística*** |
+
+```{r}
+
+```
+
+## Exloración base de datos
+
+-   Primero, se filtran a los pacientes acorde a criterios de elegibilidad
+
+```{r}
+#| column: margin
+
+library(readxl)
+BASE <- read_excel("cocafe4.xlsx") # 02-06-2026 ultima: 21-04-2026
+
+library(kableExtra)
+table(BASE$seincluye, useNA = "ifany") %>% # 1 = Si, 2 = No
+  as.data.frame() %>%
+  kable(col.names = c("Cumplimiento criterios", "n")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+
+```
+
+*1800 pacientes cumplen criterios, se procede a filtrar y explorar solo en la primera visita*
+
+### Exploracion base dedatos y limpieza
+
+```{r}
+library(dplyr) 
+BASE_fil <- BASE %>% filter(seincluye == 1) #filtra por criterios
+BASE1 <- BASE_fil %>% filter(BASE_fil$redcap_event_name == "visita_lnea_de_bas_arm_1") #filtra por primer avivista
+
+
+library(dlookr)
+library(DT)
+library(janitor)
+
+cols_fecha <- grep("Fecha", names(BASE1), value = TRUE) 
+BASE1 <- BASE1 %>% mutate(across(all_of(cols_fecha), ~ as.Date(.x, format = "%d/%m/%Y"))) 
+BASE1 <- BASE1 %>% clean_names()
+
+BASE1 <- BASE1 %>%
+  clean_names()  # Convierte todo a snake_case automáticamente
+
+library(labelled)
+
+diagnose(BASE1) %>% 
+  mutate(across(where(is.numeric), ~round(., 1))) %>% #redondear a 1
+  datatable(options = list(pageLength = 25))
+
+```
+
+### Creación nuevas variables
+
+```{r}
+library(Hmisc)
+
+# Calculando la edad
+BASE1$edad <- floor(lubridate::interval(BASE1$fecha_nacimiento, BASE1$fecha_diligenciamiento) / lubridate::years(1))
+BASE1 <- BASE1[!is.na(BASE1$edad), ]
+
+
+BASE1 <- BASE1 %>% #ok
+  mutate(hta_diab2 = case_when(
+    hta_pat == 2 & dm_pat == 2 ~ "Sin DM2 y Sin HTA",
+    hta_pat == 1 & dm_pat == 2 ~ "HTA Únicamente",
+    hta_pat == 2 & dm_pat == 1 ~ "DM2 Únicamente",
+    hta_pat == 1 & dm_pat == 1 ~ "HTA y DM2")
+    )
+
+BASE1 <- BASE1 %>%  #ok
+mutate(tiempoconsumo = case_when(
+    historia_consumo_ano == "NA"  ~ "No responde",
+    historia_consumo_ano <= 10 ~ "De  1 a 10 años",
+    historia_consumo_ano <= 20 ~ "De  11 a 20 años",
+    historia_consumo_ano > 20 ~ "Más de 20 años")
+    )
+
+
+BASE1 <- BASE1 %>% #ok
+mutate(frec_consumo = case_when(
+    frecuencia_consumo == 1  ~ "Consumo diario",
+    frecuencia_consumo > 1 ~ "Consumo no diario")
+)
+
+
+BASE1 <- BASE1 %>% #ok
+mutate(tamaño_tasa_std = case_when(
+    cantidad_taza_cafe == 1  ~ 0.53,
+    cantidad_taza_cafe == 2  ~ 1,
+    cantidad_taza_cafe == 3  ~ 1.40,
+    cantidad_taza_cafe == 4  ~ 1.67)
+)
+
+BASE1$frecuencia_consumo_diario_num <- as.numeric(BASE1$frecuencia_consumo_diario) #ok
+BASE1$frecuencia_consumo_semana_num <- as.numeric(BASE1$frecuencia_consumo_semana) #ok
+BASE1$frecuencia_consumo_mensual_num <- as.numeric(BASE1$frecuencia_consumo_mensual) #ok
+BASE1$frecuencia_consumo_ocasional_num <- as.numeric(BASE1$frecuencia_consumo_ocasional) #ok
+
+BASE1 <- BASE1 %>%
+mutate(consumo_diario_std = case_when(
+  frecuencia_consumo == 1 ~ tamaño_tasa_std*frecuencia_consumo_diario_num,
+  frecuencia_consumo == 2 ~ tamaño_tasa_std*frecuencia_consumo_semana_num/7,
+  frecuencia_consumo == 3 ~ tamaño_tasa_std*frecuencia_consumo_mensual_num/30,
+  frecuencia_consumo == 4 ~ tamaño_tasa_std*frecuencia_consumo_ocasional_num/60)
+)
+
+BASEini <- BASE1
+BASE1 <- BASE1 %>% filter(cons_cafecocafe == 1)
+
+
+
+BASEini <- BASEini %>%
+  mutate(consumo_diario_recat = case_when(
+   cons_cafecocafe ==2 ~ "No consumo",
+   cons_cafecocafe !=2  & frecuencia_consumo == 1 ~ "Consumo diario",
+   cons_cafecocafe !=2  & frecuencia_consumo > 1 ~ "Consumo No diario"
+  ) )
+
+BASEini <- BASEini %>% #ok
+  mutate(consumo_diario_recat2 = case_when(
+    cons_cafecocafe ==2 ~ "No consumo",
+    cons_cafecocafe !=2  & frecuencia_consumo >= 1 ~ "Consumo"
+  ) )
+
+BASEini <- BASEini %>% 
+  mutate(consumo_diario_std_cat = case_when(
+   consumo_diario_std == 0 | cons_cafecocafe ==2 ~ "No Consume",    
+    consumo_diario_std <= 2  ~ "Consumo Ligero",
+    consumo_diario_std <= 4   ~ "Consumo Moderado",
+    consumo_diario_std > 4  ~ "Consumo Alto")
+)
+
+BASE1 <- BASE1 %>%
+  mutate(consumo_diario_std_cat = case_when(
+    consumo_diario_std <= 2  ~ "Consumo Ligero",
+    consumo_diario_std <= 4  ~ "Consumo Moderado",
+    consumo_diario_std > 4   ~ "Consumo Alto"))
+
+BASE1$consumo_diario_std_cat <- relevel(factor(BASE1$consumo_diario_std_cat), ref = "Consumo Ligero")
+
+BASE1 <- BASE1 %>%
+  mutate(consumo_diario_std_3cat = case_when(
+    consumo_diario_std <= 2  ~ "Consumo Ligero",
+    consumo_diario_std <= 4  ~ "Consumo Moderado",
+    consumo_diario_std > 4   ~ "Consumo Alto"),
+  consumo_diario_std_3cat = factor(consumo_diario_std_3cat,
+                                    levels = c("Consumo Ligero",
+                                               "Consumo Moderado",
+                                               "Consumo Alto")))
+
+
+BASEini <- BASEini %>%
+ mutate(consumo_diario_std_3cat = case_when(
+  consumo_diario_std == 0 | cons_cafecocafe ==2 | consumo_diario_std <= 2 ~ "No Consume o Consumo Ligero",    
+  consumo_diario_std <= 4   ~ "Consumo Moderado",
+  consumo_diario_std > 4  ~ "Consumo Alto"),
+  consumo_diario_std_3cat = factor(consumo_diario_std_3cat, 
+  levels = c("No Consume o Consumo Ligero","Consumo Moderado","Consumo Alto"))
+  )
+
+
+
+BASE1$sexo_2 <- factor(BASE1$sexo_2,
+  levels = c(1, 2),
+  labels = c("Femenino", "Masculino")
+)
+
+BASE1 <- BASE1 %>% #ok ajuste en sexo
+  mutate(auditc_cat = case_when(
+    puntaje_auditc >= 8 & sexo_2  == "Masculino" ~ "Consumo riesgoso de alcohol en hombres",
+    puntaje_auditc < 8 & sexo_2 == "Masculino" ~ "Consumo No riesgoso de alcohol en hombres",
+    puntaje_auditc >= 8 & sexo_2 == "Femenino" ~ "Consumo riesgoso de alcohol en mujeres",
+    puntaje_auditc < 8 & sexo_2 == "Femenino" ~ "Consumo No riesgoso de alcohol en mujeres",
+    )
+    )
+
+
+BASE1 <- BASE1 %>% #ok
+  mutate(auditc_cat2 = case_when(
+    unica_mujer==1 | nicamujer==1 ~ "Consumo No riesgoso de alcohol",
+    auditc_cat == "Consumo riesgoso de alcohol en mujeres" ~ "Consumo riesgoso de alcohol",
+    auditc_cat == "Consumo riesgoso de alcohol en hombres" ~ "Consumo riesgoso de alcohol",
+    auditc_cat == "Consumo No riesgoso de alcohol en hombres" ~ "Consumo No riesgoso de alcohol",
+    auditc_cat == "Consumo No riesgoso de alcohol en mujeres" ~ "Consumo No riesgoso de alcohol",
+    )
+    )
+
+#### Riesgo cardiovascular 
+
+BASE1 <- BASE1 %>%
+  rename(Riesgo_cardiovascular = riesgo_cardiovasc_v2_942fe9)
+
+BASE1 <- BASE1 %>% #ok ajustando nombre de la variable
+  mutate(riesgo_card_cat = case_when(
+    Riesgo_cardiovascular < 10 ~ "1.Bajo (<10%)",
+    Riesgo_cardiovascular >= 10 & Riesgo_cardiovascular <= 20 ~ "2.Alto (10-20%)",
+    Riesgo_cardiovascular > 20 ~ "3.Muy alto (>20%)"
+  ))
+
+
+BASE1 <- BASE1 %>% #ok ajustando nombre riesgo cardiovascular
+  mutate(riesgo_card_cat2 = case_when(
+    Riesgo_cardiovascular < 10 ~ "1.Bajo (<10%)",
+    Riesgo_cardiovascular >= 10 ~ "2.Alto (≥10%)"
+  ))
+
+############ ACTIVIDAD FISICA #####################################
+
+BASE1$time_vigorosa <- as.numeric(BASE1$time_vigorosa) #OK
+BASE1$time_moderada <- as.numeric(BASE1$time_moderada) #OK
+BASE1$frec_vigorosa <- as.numeric(BASE1$frec_vigorosa) #OK
+BASE1$frec_moderada <- as.numeric(BASE1$frec_moderada) #OK
+
+BASE1$tiempo_vig <- BASE1$frec_vigorosa*BASE1$time_vigorosa #OK
+BASE1$tiempo_mod <- BASE1$frec_moderada*BASE1$time_moderada #OK
+
+BASE1 <- BASE1 %>% #OK
+  mutate(act_fisica = case_when(
+    tiempo_vig >= 75 | tiempo_mod >= 150 ~ "Cumple actividad física recomendada",
+    tiempo_vig < 75 | frec_vigorosa==0  ~ "No cumple actividad física recomendada",
+    tiempo_mod < 150 | frec_moderada==0  ~ "No cumple actividad física recomendada")
+    )
+    
+### USO BEBIDAS CON CAFE
+BASE1$usafiltro <- ifelse(BASE1$tipo_preparacion >=3 & BASE1$tipo_preparacion <=8, 1,0) #OK
+BASE1$tomatinto <- ifelse(BASE1$tipo_bebida ==1, 1,0) #OK
+
+### imc
+BASE1$imccat <- cut(BASE1$imc, #OK
+                       breaks = c(-Inf, 24.9, Inf),
+                       labels = c("Normal", "Exceso de peso"))
+BASE1$perimetro_abdominal_cat <- ifelse((BASE1$sexo_2 == "Masculino" & BASE1$perimetro_abdominal >= 94) | (BASE1$sexo_2 == "Femenino" & BASE1$perimetro_abdominal >= 90), "Riesgo aumentado", "Riesgo normal") #OK AJJUSTANDO VARIABLE SEXO
+
+
+### estrato 
+BASE1 <- BASE1 %>% #ajustado 
+  mutate(estrato_cat= cut(estrato, 
+                           breaks = c(-Inf, 2, 4, Inf), 
+                           right = T, 
+                           labels = c("1-2","3-4", "5-6"))) 
+
+
+#riesgo cardiovascular
+BASE1$riesgo_card_cat2b <- ifelse(BASE1$riesgo_card_cat2 == "2.Alto (≥10%)", 1, 0)
+BASE1$hta_diab2 <- relevel(factor(BASE1$hta_diab2), ref = "HTA Únicamente")
+
+#reorganizacion factores
+
+BASEini$consumo_diario_std_3cat <- relevel(factor(BASEini$consumo_diario_std_3cat), ref = "No Consume o Consumo Ligero")
+
+BASE1$usafiltro_f <- factor(BASE1$usafiltro, levels = c(1,0), labels = c("usa filtro", "No Usa filtro"))
+BASE1$usafiltro_f <- relevel(BASE1$usafiltro_f, ref = "usa filtro")
+
+
+BASE1$add_endulzante_sino <- factor(BASE1$add_endulzante_sino,
+  levels = c(1, 2),
+  labels = c("Si", "No")
+) #ajustado
+
+BASE1$tomatinto <- factor(BASE1$tomatinto, levels = c(1,0), labels = c("Toma tinto", "No toma tinto"))
+BASE1$tomatinto <- relevel(BASE1$tomatinto, ref = "Toma tinto")
+
+BASEini$consumo_diario_std_cat <- relevel(factor(BASEini$consumo_diario_std_cat), ref = "No Consume")
+BASEini$consumo_diario_recat <- relevel(factor(BASEini$consumo_diario_recat), ref = "No consumo")
+BASEini$consumo_diario_recat2 <- relevel(factor(BASEini$consumo_diario_recat2), ref = "No consumo")
+
+
+BASE1 <- BASE1 %>%
+  mutate(antec_fam = case_when(
+    antfamiliar_infarto == 0 ~ "Sin Antecedentes Familiares",
+    antfamiliar_infarto ==1  &  familiar==1  ~ "Con Antecedentes Familiares",
+    antfamiliar_infarto ==1  &  familiar==2  ~ "Sin Antecedentes Familiares"
+    )
+  )
+########################################################################
+############################## BASEini##################################
+########################################################################
+
+BASEini$sexo_2 <- factor(BASEini$sexo_2,
+  levels = c(1, 2),
+  labels = c("Femenino", "Masculino")
+)
+
+BASEini <- BASEini %>% #ok ajuste en sexo
+  mutate(auditc_cat = case_when(
+    puntaje_auditc >= 8 & sexo_2  == "Masculino" ~ "Consumo riesgoso de alcohol en hombres",
+    puntaje_auditc < 8 & sexo_2 == "Masculino" ~ "Consumo No riesgoso de alcohol en hombres",
+    puntaje_auditc >= 8 & sexo_2 == "Femenino" ~ "Consumo riesgoso de alcohol en mujeres",
+    puntaje_auditc < 8 & sexo_2 == "Femenino" ~ "Consumo No riesgoso de alcohol en mujeres",
+    )
+    )
+
+
+BASEini <- BASEini %>% #ok
+  mutate(auditc_cat2 = case_when(
+    unica_mujer==1 | nicamujer==1 ~ "Consumo No riesgoso de alcohol",
+    auditc_cat == "Consumo riesgoso de alcohol en mujeres" ~ "Consumo riesgoso de alcohol",
+    auditc_cat == "Consumo riesgoso de alcohol en hombres" ~ "Consumo riesgoso de alcohol",
+    auditc_cat == "Consumo No riesgoso de alcohol en hombres" ~ "Consumo No riesgoso de alcohol",
+    auditc_cat == "Consumo No riesgoso de alcohol en mujeres" ~ "Consumo No riesgoso de alcohol",
+    )
+    )
+
+#### Riesgo cardiovascular 
+
+BASEini <- BASEini %>%
+  rename(Riesgo_cardiovascular = riesgo_cardiovasc_v2_942fe9)
+
+BASEini <- BASEini %>% #ok ajustando nombre de la variable
+  mutate(riesgo_card_cat = case_when(
+    Riesgo_cardiovascular < 10 ~ "1.Bajo (<10%)",
+    Riesgo_cardiovascular >= 10 & Riesgo_cardiovascular <= 20 ~ "2.Alto (10-20%)",
+    Riesgo_cardiovascular > 20 ~ "3.Muy alto (>20%)"
+  ))
+
+
+BASEini <- BASEini %>% #ok ajustando nombre riesgo cardiovascular
+  mutate(riesgo_card_cat2 = case_when(
+    Riesgo_cardiovascular < 10 ~ "1.Bajo (<10%)",
+    Riesgo_cardiovascular >= 10 ~ "2.Alto (≥10%)"
+  ))
+
+############ ACTIVIDAD FISICA #####################################
+
+BASEini$time_vigorosa <- as.numeric(BASEini$time_vigorosa) #OK
+BASEini$time_moderada <- as.numeric(BASEini$time_moderada) #OK
+BASEini$frec_vigorosa <- as.numeric(BASEini$frec_vigorosa) #OK
+BASEini$frec_moderada <- as.numeric(BASEini$frec_moderada) #OK
+
+BASEini$tiempo_vig <- BASEini$frec_vigorosa*BASEini$time_vigorosa #OK
+BASEini$tiempo_mod <- BASEini$frec_moderada*BASEini$time_moderada #OK
+
+BASEini <- BASEini %>% #OK
+  mutate(act_fisica = case_when(
+    tiempo_vig >= 75 | tiempo_mod >= 150 ~ "Cumple actividad física recomendada",
+    tiempo_vig < 75 | frec_vigorosa==0  ~ "No cumple actividad física recomendada",
+    tiempo_mod < 150 | frec_moderada==0  ~ "No cumple actividad física recomendada")
+    )
+    
+### USO BEBIDAS CON CAFE
+BASEini$usafiltro <- ifelse(BASEini$tipo_preparacion >=3 & BASEini$tipo_preparacion <=8, 1,0) #OK
+BASEini$tomatinto <- ifelse(BASEini$tipo_bebida ==1, 1,0) #OK
+
+### imc
+BASEini$imccat <- cut(BASEini$imc, #OK
+                       breaks = c(-Inf, 24.9, Inf),
+                       labels = c("Normal", "Exceso de peso"))
+BASEini$perimetro_abdominal_cat <- ifelse((BASEini$sexo_2 == "Masculino" & BASEini$perimetro_abdominal >= 94) | (BASEini$sexo_2 == "Femenino" & BASEini$perimetro_abdominal >= 90), "Riesgo aumentado", "Riesgo normal") #OK AJJUSTANDO VARIABLE SEXO
+
+
+### estrato 
+BASEini <- BASEini %>% #ajustado 
+  mutate(estrato_cat= cut(estrato, 
+                           breaks = c(-Inf, 2, 4, Inf), 
+                           right = T, 
+                           labels = c("1-2","3-4", "5-6"))) 
+
+
+#riesgo cardiovascular
+BASEini$riesgo_card_cat2b <- ifelse(BASEini$riesgo_card_cat2 == "2.Alto (≥10%)", 1, 0)
+BASEini$hta_diab2 <- relevel(factor(BASEini$hta_diab2), ref = "HTA Únicamente")
+
+BASEini$usafiltro_f <- factor(BASEini$usafiltro, levels = c(1,0), labels = c("usa filtro", "No Usa filtro"))
+BASEini$usafiltro_f <- relevel(BASEini$usafiltro_f, ref = "usa filtro")
+
+
+BASEini$add_endulzante_sino <- factor(BASEini$add_endulzante_sino,
+  levels = c(1, 2),
+  labels = c("Si", "No")
+) #ajustado
+
+BASEini$tomatinto <- factor(BASEini$tomatinto, levels = c(1,0), labels = c("Toma tinto", "No toma tinto"))
+BASEini$tomatinto <- relevel(BASEini$tomatinto, ref = "Toma tinto")
+
+BASEini <- BASEini %>%
+  mutate(antec_fam = case_when(
+    antfamiliar_infarto == 0 ~ "Sin Antecedentes Familiares",
+    antfamiliar_infarto ==1  &  familiar==1  ~ "Con Antecedentes Familiares",
+    antfamiliar_infarto ==1  &  familiar==2  ~ "Sin Antecedentes Familiares"
+    )
+  )
+```
+
+#### Recodificando variables adicionales
+
+```{r}
+BASE1 <- BASE1 %>% #ok
+mutate(estado_civil = case_when(
+    estado_civil == 1 ~ "Soltero/a",    
+    estado_civil == 2 ~ "Casado/a",    
+    estado_civil == 3 ~ "Union libre",    
+    estado_civil == 4 ~ "Divorciado/a",
+    estado_civil == 5 ~ "Vuido/a"
+))
+
+BASE1 <- BASE1 %>% #ok
+mutate(forma_tto = case_when(
+    forma_tto == 1 ~ "Estilo de vida",    
+    forma_tto == 2 ~ "Monoterapia",    
+    forma_tto == 3 ~ "Terapia combinada",    
+    forma_tto == 4 ~ "Terapia naturista",
+    forma_tto == 5 ~ "Ninguno"
+))
+
+BASE1 <- BASE1 %>% #ok
+mutate(ante_tabaco = case_when(
+    ante_tabaco == 1 ~ "Si",    
+    ante_tabaco == 0 ~ "No"
+))
+
+BASE1 <- BASE1 %>% #ok
+mutate(tabaquismo = case_when(
+    tabaquismo == 1 ~ "Si",    
+    tabaquismo == 0 ~ "No"
+))
+
+BASE1 <- BASE1 %>% #ok
+mutate(hospi_reciente = case_when(
+    hospi_reciente == 1 ~ "Si",    
+    hospi_reciente == 2 ~ "No"
+))
+
+BASE1 <- BASE1 %>% #ok
+mutate(hospi_reciente = case_when(
+    hospi_reciente == 1 ~ "Si",    
+    hospi_reciente == 2 ~ "No"
+))
+
+BASE1 <- BASE1 %>%
+  mutate(auditc_catN = case_when(
+    auditc_cat == "Consumo riesgoso de alcohol en hombres"    ~ "Consumo riesgoso de alcohol",
+    auditc_cat == "Consumo No riesgoso de alcohol en hombres" ~ "Consumo No riesgoso de alcohol",
+    auditc_cat == "Consumo riesgoso de alcohol en mujeres"    ~ "Consumo riesgoso de alcohol",
+    auditc_cat == "Consumo No riesgoso de alcohol en mujeres" ~ "Consumo No riesgoso de alcohol",
+    .default = NA_character_  # o puedes poner otro valor si aplica
+  ))
+
+
+BASE1 <- BASE1 %>% #ok
+mutate(dislipidemia = case_when(
+    dislipidemia == 1 ~ "Si",    
+    dislipidemia == 0 ~ "No"
+))
+
+BASE1 <- BASE1 %>% #ok
+mutate(alg_enf = case_when(
+    alg_enf == 1 ~ "Si",    
+    alg_enf == 2 ~ "No"
+))
+
+###############################################################################
+### Ajustes 22 abril ##########################################################
+###############################################################################
+
+#consumo no riesgoso de alchol en NA
+BASE1$auditc_catN[is.na(BASE1$auditc_catN)] <- "Consumo No riesgoso de alcohol"
+
+#patron dieta consumo sal
+BASE1 <- BASE1 %>% #
+mutate(salt_add_2 = case_when(
+    salt_add_2 == 1 ~ "Si",    
+    salt_add_2 == 2 ~ "No"
+))
+
+#recategorizacion estado civil
+BASE1 <- BASE1 %>% #
+mutate(estado_civil_cat = case_when(
+    estado_civil == "Soltero/a" ~ "Sin pareja",    
+    estado_civil == "Casado/a" ~  "Con pareja",    
+    estado_civil == "Union libre" ~ "Con pareja",    
+    estado_civil == "Divorciado/a" ~ "Sin pareja", 
+    estado_civil == "Vuido/a" ~ "Sin pareja"
+))
+
+#tension arterial 
+BASE1$control_ta <- ifelse(BASE1$ta_sisto < 140 & BASE1$ta_diast < 90,
+                           "Control",
+                           "No control") #BASE1$record_id[BASE1$ta_sisto == 1.66] ID 3080
+
+#hemoglobina_glucosilada
+#summary(BASE1$hba1c_value_v2_1b68d9)
+BASE1 <- BASE1 %>% 
+  mutate(hemoglobina_glucosilada= cut(hba1c_value_v2_1b68d9, 
+                           breaks = c(-Inf, 7, Inf), 
+                           right = F, 
+                           labels = c("Controlada","No controlada")))
+
+#edad 
+#summary(BASE1$edad) mediana 66 años
+#BASE1$record_id[BASE1$edad == 0] #ID 1714, 1809
+#BASE1$record_id[BASE1$edad > 99] #ID 2136
+BASE1 <- BASE1 %>% 
+  mutate(edad_cat= cut(edad, 
+                           breaks = c(-Inf, 66, Inf), 
+                           right = T, 
+                           labels = c("=<66",">66")))
+
+#######################################################################
+#################### BASEini###########################################
+#######################################################################
+
+
+BASEini <- BASEini %>% #ok
+mutate(estado_civil = case_when(
+    estado_civil == 1 ~ "Soltero/a",    
+    estado_civil == 2 ~ "Casado/a",    
+    estado_civil == 3 ~ "Union libre",    
+    estado_civil == 4 ~ "Divorciado/a",
+    estado_civil == 5 ~ "Vuido/a"
+))
+
+BASEini <- BASEini %>% #ok
+mutate(forma_tto = case_when(
+    forma_tto == 1 ~ "Estilo de vida",    
+    forma_tto == 2 ~ "Monoterapia",    
+    forma_tto == 3 ~ "Terapia combinada",    
+    forma_tto == 4 ~ "Terapia naturista",
+    forma_tto == 5 ~ "Ninguno"
+))
+
+BASEini <- BASEini %>% #ok
+mutate(ante_tabaco = case_when(
+    ante_tabaco == 1 ~ "Si",    
+    ante_tabaco == 0 ~ "No"
+))
+
+BASEini <- BASEini %>% #ok
+mutate(tabaquismo = case_when(
+    tabaquismo == 1 ~ "Si",    
+    tabaquismo == 0 ~ "No"
+))
+
+BASEini <- BASEini %>% #ok
+mutate(hospi_reciente = case_when(
+    hospi_reciente == 1 ~ "Si",    
+    hospi_reciente == 2 ~ "No"
+))
+
+
+BASEini <- BASEini %>%
+  mutate(auditc_catN = case_when(
+    auditc_cat == "Consumo riesgoso de alcohol en hombres"    ~ "Consumo riesgoso de alcohol",
+    auditc_cat == "Consumo No riesgoso de alcohol en hombres" ~ "Consumo No riesgoso de alcohol",
+    auditc_cat == "Consumo riesgoso de alcohol en mujeres"    ~ "Consumo riesgoso de alcohol",
+    auditc_cat == "Consumo No riesgoso de alcohol en mujeres" ~ "Consumo No riesgoso de alcohol",
+    .default = NA_character_  # o puedes poner otro valor si aplica
+  ))
+
+BASEini <- BASEini %>% #ok
+mutate(dislipidemia = case_when(
+    dislipidemia == 1 ~ "Si",    
+    dislipidemia == 0 ~ "No"
+))
+
+BASEini <- BASEini %>% #ok
+mutate(alg_enf = case_when(
+    alg_enf == 1 ~ "Si",    
+    alg_enf == 2 ~ "No"
+))
+
+###############################################################################
+### Ajustes 22 abril ##########################################################
+###############################################################################
+
+#consumo no riesgoso de alchol en NA
+BASEini$auditc_catN[is.na(BASEini$auditc_catN)] <- "Consumo No riesgoso de alcohol"
+
+#patron dieta consumo sal
+BASEini <- BASEini %>% #
+mutate(salt_add_2 = case_when(
+    salt_add_2 == 1 ~ "Si",    
+    salt_add_2 == 2 ~ "No"
+))
+
+#recategorizacion estado civil
+BASEini <- BASEini %>% #
+mutate(estado_civil_cat = case_when(
+    estado_civil == "Soltero/a" ~ "Sin pareja",    
+    estado_civil == "Casado/a" ~  "Con pareja",    
+    estado_civil == "Union libre" ~ "Con pareja",    
+    estado_civil == "Divorciado/a" ~ "Sin pareja", 
+    estado_civil == "Vuido/a" ~ "Sin pareja"
+))
+
+#tension arterial 
+BASEini$control_ta <- ifelse(BASEini$ta_sisto < 140 & BASEini$ta_diast < 90,
+                           "Control",
+                           "No control") #BASE1$record_id[BASE1$ta_sisto == 1.66] ID 3080
+
+#hemoglobina_glucosilada
+#summary(BASE1$hba1c_value_v2_1b68d9)
+BASEini <- BASEini %>% 
+  mutate(hemoglobina_glucosilada= cut(hba1c_value_v2_1b68d9, 
+                           breaks = c(-Inf, 7, Inf), 
+                           right = F, 
+                           labels = c("Controlada","No controlada")))
+
+
+BASEini <- BASEini %>% 
+  mutate(edad_cat= cut(edad, 
+                           breaks = c(-Inf, 66, Inf), 
+                           right = T, 
+                           labels = c("=<66",">66")))
+
+```
+
+## Análisis descriptivo inicial
+
+```{r}
+BASEini <- BASEini %>% 
+  mutate(consumo_cafe = case_when(
+   consumo_diario_std <1 ~ "<1taza/día", 
+   consumo_diario_std >= 1 ~ "≥ 1taza/día"),
+   consumo_cafe = factor(consumo_cafe, 
+  levels = c("<1taza/día","≥ 1taza/día"))
+  )
+
+
+library(gtsummary)
+tabla0 <- BASEini %>%
+  select(edad, edad_cat, sexo_2, estrato_cat, estado_civil_cat, imccat, 
+         perimetro_abdominal_cat, hta_diab2, forma_tto, riesgo_card_cat2, 
+         dislipidemia, alg_enf, antec_fam, ta_sisto, ta_diast, 
+         control_ta, hemoglobina_glucosilada, auditc_catN, ante_tabaco, 
+         tabaquismo, act_fisica, salt_add_2, consumo_cafe) %>%
+  tbl_summary(
+    by = consumo_cafe,
+    type = list(
+      all_continuous()                    ~ "continuous2",
+      c(dislipidemia, alg_enf)            ~ "categorical"
+    ),
+    label = list(
+      edad                    ~ "Edad (años)",
+      edad_cat                ~ "Edad (cat)",
+      sexo_2                  ~ "Sexo",
+      estrato_cat             ~ "Estrato socioeconómico",
+      estado_civil_cat        ~ "Estado civil",
+      imccat                  ~ "Índice de masa corporal",
+      perimetro_abdominal_cat ~ "Perímetro abdominal",
+      hta_diab2               ~ "Hipertensión - diabetes",
+      forma_tto               ~ "Formato tratamiento",
+      riesgo_card_cat2        ~ "Riesgo cardiovascular",
+      dislipidemia            ~ "Dislipidemia", 
+      alg_enf                 ~ "Otra enfermedad",
+      antec_fam               ~ "Antecedentes familiares",
+      ta_sisto                ~ "Tensión arterial sistólica",
+      ta_diast                ~ "Tensión arterial diastólica",
+      control_ta              ~ "Control de HTA",
+      hemoglobina_glucosilada ~ "Hemoglobina glucosilada",
+      auditc_catN             ~ "AUDIT",
+      tabaquismo              ~ "Tabaquismo",
+      ante_tabaco             ~ "Tabaco ult. 30 dias",
+      act_fisica              ~ "Actividad física",
+      salt_add_2              ~ "Adicion sal comidas"
+    ),
+    statistic = list(
+      all_continuous2()  ~ c(
+        "{mean} ({sd})",
+        "{median} ({p25}, {p75})",
+        "{min} - {max}"
+      ),
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = list(
+      all_continuous()  ~ 2,
+      all_categorical() ~ 1
+    ),
+    missing = "ifany",
+    missing_text = "Sin dato"
+  ) %>%
+  add_p(
+    test = list(
+      all_continuous()  ~ "kruskal.test",  
+      all_categorical() ~ "fisher.test"
+    ),
+    pvalue_fun = ~ style_pvalue(.x, digits = 3)
+  ) %>%
+  add_overall() %>%
+  modify_header(label ~ "**Variable**") %>%
+  bold_labels() %>%
+  bold_p(t = 0.05) %>%
+  modify_caption("**Tabla 1**")
+
+tabla0
+
+
+```
+
+ID con datos faltantes
+
+-   Tensión arterial sistólica: 30 2629 2630 2638 2945 3518
+-   Tensión arterial diastólica: 30 2629 2630 2638 2945 3518
+-   Perimetro abdominal: 30, 2629, 2630, 2638, 2945, 3518
+-   IMC: 30, 2629, 2630, 2638, 2945
+-   Riesgo cardiovascular: 30,205,382,424,438,533,590,612,616,621,659,767,786,818,829,831,836, 837,843,849,853,875,877,920,926,927,941,961,1010,1047,1059,1092,1100,1107, 1119, 1128, 1145, 1146, 1153, 1155, 1161, 1181, 1187, 1193, 1214, 1232, 1235, 1268, 1298, 1301, 1320,1329, 1330, 1340, 1346, 1374, 1378, 1379, 1383, 1401, 1403, 1407, 1409, 1411, 1412, 1436, 1437, 1439,1455 1457, 1458, 1482, 1502, 1509, 1512, 1515, 1573, 1575, 1581, 1610, 1615, 1622, 1684, 1690, 1830, 1834, 1863, 1865, 1895, 1911, 1912, 1915, 1927, 1928, 1929, 1936, 1944, 1997, 2094, 2123, 2134, 2223,2243, 2254,2264,2361,2365,2372,2408,2416,2463,2499,2527,2568,2575,2582,2587,2624,2660, 2789, 2816, 2850, 2857, 2867, 2895, 2959, 2978, 2984, 3072, 3077, 3078, 3183, 3207, 3210, 3272, 3277,3283, 3321, 3359, 3383, 3422, 3432, 3451, 3464, 3475, 3480, 3483, 3485, 3486, 3488, 3495, 3496, 3497,3499, 3502, 3503, 3504, 3506, 3507, 3510, 3513, 3516, 3517, 3518
+
+```{r}
+BASEini$record_id[is.na(BASEini$perimetro_abdominal_cat)]; BASEini$record_id[is.na(BASEini$ta_sisto)];
+BASEini$record_id[is.na(BASEini$ta_diast )];
+BASEini$record_id[is.na(BASEini$imccat  )];
+BASEini$record_id[is.na(BASEini$Riesgo_cardiovascular )];
+
+```
+
+## Características sociodemográficas y clínicas de acuerdo a la dosis diaria de consumo de café tomadores y no tomadores de cafe
+
+```{r}
+
+BASEini <- BASEini %>%
+ mutate(consumo_diario_std_4cat = case_when(
+  cons_cafecocafe ==2 | consumo_diario_std == 0 ~ "No consume café",
+  consumo_diario_std <= 2 ~ "Consumo Ligero",    
+  consumo_diario_std <= 4   ~ "Consumo Moderado",
+  consumo_diario_std > 4  ~ "Consumo Alto"),
+  consumo_diario_std_4cat = factor(consumo_diario_std_4cat, 
+  levels = c("No consume café", "Consumo Ligero","Consumo Moderado","Consumo Alto"))
+  )
+
+
+tabla0.1 <- BASEini %>%
+  select(edad, edad_cat, sexo_2, estrato_cat, estado_civil_cat, imccat, 
+         perimetro_abdominal_cat, hta_diab2, forma_tto, riesgo_card_cat2, 
+         dislipidemia, alg_enf, antec_fam, ta_sisto, ta_diast, 
+         control_ta, hemoglobina_glucosilada, auditc_catN, ante_tabaco, 
+         tabaquismo, act_fisica, salt_add_2, consumo_diario_std_4cat) %>%
+  tbl_summary(
+    by = consumo_diario_std_4cat,
+    type = list(
+      all_continuous()                    ~ "continuous2",
+      c(dislipidemia, alg_enf)            ~ "categorical"
+    ),
+    label = list(
+      edad                    ~ "Edad (años)",
+      edad_cat                ~ "Edad (cat)",
+      sexo_2                  ~ "Sexo",
+      estrato_cat             ~ "Estrato socioeconómico",
+      estado_civil_cat        ~ "Estado civil",
+      imccat                  ~ "Índice de masa corporal",
+      perimetro_abdominal_cat ~ "Perímetro abdominal",
+      hta_diab2               ~ "Hipertensión - diabetes",
+      forma_tto               ~ "Formato tratamiento",
+      riesgo_card_cat2        ~ "Riesgo cardiovascular",
+      dislipidemia            ~ "Dislipidemia", 
+      alg_enf                 ~ "Otra enfermedad",
+      antec_fam               ~ "Antecedentes familiares",
+      ta_sisto                ~ "Tensión arterial sistólica",
+      ta_diast                ~ "Tensión arterial diastólica",
+      control_ta              ~ "Control de HTA",
+      hemoglobina_glucosilada ~ "Hemoglobina glucosilada",
+      auditc_catN             ~ "AUDIT",
+      tabaquismo              ~ "Tabaquismo",
+      ante_tabaco             ~ "Tabaco ult. 30 dias",
+      act_fisica              ~ "Actividad física",
+      salt_add_2              ~ "Adicion sal comidas"
+    ),
+    statistic = list(
+      all_continuous2()  ~ c(
+        "{mean} ({sd})",
+        "{median} ({p25}, {p75})",
+        "{min} - {max}"
+      ),
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = list(
+      all_continuous()  ~ 2,
+      all_categorical() ~ 1
+    ),
+    missing = "ifany",
+    missing_text = "Sin dato"
+  ) %>%
+  add_p(
+    test = list(
+      all_continuous()  ~ "kruskal.test",  
+      all_categorical() ~ "fisher.test"
+    ),
+    pvalue_fun = ~ style_pvalue(.x, digits = 3)
+  ) %>%
+  add_overall() %>%
+  modify_header(label ~ "**Variable**") %>%
+  bold_labels() %>%
+  bold_p(t = 0.05) %>%
+  modify_caption("**Tabla 2**")
+
+tabla0.1
+
+      
+```
+
+Se identificaron dos pacientes que no tenian dato en la variable de estrato de café - ID 30 no tiene dato acerca de la variable si consume café. - ID 2898 puede no tener algún de las variables útiles para la estandarización de consumo de cafe.
+
+```{r}
+kable(BASEini %>% 
+     filter(is.na(consumo_diario_std_4cat)) %>% 
+     select(record_id, cons_cafecocafe, consumo_diario_std))
+```
+
+## Análisis descriptivo filtrado por consumidores de café
+
+-   Variables sociodemográficas y clínicas cruzada por consumo de café solamente en consumidores.
+
+```{r}
+
+tabla1 <- BASE1 %>%
+  select(edad, edad_cat, sexo_2, estrato_cat, estado_civil_cat, imccat, 
+         perimetro_abdominal_cat, hta_diab2, forma_tto, riesgo_card_cat2, 
+         dislipidemia, alg_enf, antec_fam, ta_sisto, ta_diast, 
+         control_ta, hemoglobina_glucosilada, auditc_catN, ante_tabaco, 
+         tabaquismo, act_fisica, salt_add_2, consumo_diario_std_3cat) %>%
+  tbl_summary(
+    by = consumo_diario_std_3cat,
+    type = list(
+      all_continuous()                    ~ "continuous2",
+      c(dislipidemia, alg_enf)            ~ "categorical"
+    ),
+    label = list(
+      edad                    ~ "Edad (años)",
+      edad_cat                ~ "Edad (cat)",
+      sexo_2                  ~ "Sexo",
+      estrato_cat             ~ "Estrato socioeconómico",
+      estado_civil_cat        ~ "Estado civil",
+      imccat                  ~ "Índice de masa corporal",
+      perimetro_abdominal_cat ~ "Perímetro abdominal",
+      hta_diab2               ~ "Hipertensión - diabetes",
+      forma_tto               ~ "Formato tratamiento",
+      riesgo_card_cat2        ~ "Riesgo cardiovascular",
+      dislipidemia            ~ "Dislipidemia", 
+      alg_enf                 ~ "Otra enfermedad",
+      antec_fam               ~ "Antecedentes familiares",
+      ta_sisto                ~ "Tensión arterial sistólica",
+      ta_diast                ~ "Tensión arterial diastólica",
+      control_ta              ~ "Control de HTA",
+      hemoglobina_glucosilada ~ "Hemoglobina glucosilada",
+      auditc_catN             ~ "AUDIT",
+      tabaquismo              ~ "Tabaquismo",
+      ante_tabaco             ~ "Tabaco ult. 30 dias",
+      act_fisica              ~ "Actividad física",
+      salt_add_2              ~ "Adicion sal comidas"
+    ),
+    statistic = list(
+      all_continuous2()  ~ c(
+        "{mean} ({sd})",
+        "{median} ({p25}, {p75})",
+        "{min} - {max}"
+      ),
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = list(
+      all_continuous()  ~ 2,
+      all_categorical() ~ 1
+    ),
+    missing = "ifany",
+    missing_text = "Sin dato"
+  ) %>%
+  add_p(
+    test = list(
+      all_continuous()  ~ "kruskal.test",  
+      all_categorical() ~ "fisher.test"
+    ),
+    pvalue_fun = ~ style_pvalue(.x, digits = 3)
+  ) %>%
+  add_overall() %>%
+  modify_header(label ~ "**Variable**") %>%
+  bold_labels() %>%
+  bold_p(t = 0.05) %>%
+  modify_caption("**Tabla 3**")
+
+tabla1
+```
+
+*De los pacientes que usan algún medicamento*
+
+```{r, eval=F}
+# Primero, todos los rename en un solo bloque ✅
+BASE2<- BASE1
+BASE1 <- BASE1 %>%
+  rename(
+    Sulfonilureas               = tratamiento_dm_2,
+    Biguanidas                  = tratamiento_dm_2,
+    Tiazolidinedionas           = tratamiento_dm_3,
+    Meglitinidas                = tratamiento_dm_4,
+    Inhibidores_laalfa_glucosidasa = tratamiento_dm_5,
+    Analog_laamilina              = tratamiento_dm_6,
+    Inhib._laDPP4                  = tratamiento_dm_7,
+    Inhib._SGLT2                 = tratamiento_dm_8,
+    Agonistas_receptor_GLP1     = tratamiento_dm_9,
+    Agonistas_receptorGIP_GLP1  = tratamiento_dm_10,
+    Insulinas                   = tratamiento_dm_11,
+    Acido_Acetil_Salicilico     = otros_med_1,
+    Analgesico                  = otros_med_2,
+    Antiuricemico               = otros_med_3,
+    otro_med                    = otros_med_6
+  )
+
+cols_med <- c("Biguanidas", "Tiazolidinedionas", "Meglitinidas", "Inhibidores_laalfa_glucosidasa", "Analog_laamilina", "Inhib._laDPP4", "Inhib._SGLT2", "Agonistas_receptor_GLP1", "Agonistas_receptorGIP_GLP1",  "Insulinas", "otro_medicamento", "Acido_Acetil_Salicilico", "Analgesico", "Antiuricemico", "otro_med")
+
+# Crear versión con Si/No para tabla descriptiva
+BASE1_tabla <- BASE1 %>%
+  mutate(across(all_of(cols_med), 
+                ~ factor(ifelse(. == 1, "Si", "No"), levels = c("Si", "No"))))
+
+tabla3 <- BASE1_tabla %>%
+  select(forma_tto, Biguanidas, Tiazolidinedionas, Inhibidores_laalfa_glucosidasa, 
+         Inhib._laDPP4, Inhib._SGLT2, Agonistas_receptor_GLP1, Insulinas, 
+         otro_medicamento, Acido_Acetil_Salicilico, Analgesico, Antiuricemico, 
+         otro_med, consumo_diario_std_3cat) %>%
+  tbl_summary(
+    by = consumo_diario_std_3cat,
+    type = list(all_continuous() ~ "continuous2"),  # ← necesario para 3 estadísticos
+    statistic = list(
+      all_continuous2() ~ c(                        # ← continuous2, no continuous
+        "{mean} ({sd})",
+        "{median} ({p25}, {p75})",
+        "{min} - {max}"
+      ),
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = list(
+      all_continuous()  ~ 2,
+      all_categorical() ~ 1
+    ),
+    missing = "ifany",
+    missing_text = "Sin dato"
+  ) %>%
+  add_p(
+    test = list(
+      all_continuous()  ~ "kruskal.test",
+      all_categorical() ~ "fisher.test"
+    ),
+    pvalue_fun = ~ style_pvalue(.x, digits = 3)
+  ) %>%
+  add_overall() %>%
+  modify_header(label ~ "**Variable**") %>%
+  bold_labels() %>%
+  bold_p(t = 0.05) %>%
+  modify_caption("**Tabla 4**")
+
+tabla3
+
+```
+
+### Variables relacionados con el consumo de café.
+
+
+```{r}
+
+BASE1 <- BASE1 %>%
+  mutate(
+    tipo_preparacion_cat = case_when(
+      tipo_preparacion == 1 ~ "Disuelto",
+      tipo_preparacion == 2 ~ "Olleta sin filtro",    
+      tipo_preparacion == 3 ~ "Filtro papel",    
+      tipo_preparacion == 4 ~ "Filtro tela",    
+      tipo_preparacion == 5 ~ "Filtro metálico",    
+      tipo_preparacion == 6 ~ "Filtro plástico",    
+      tipo_preparacion == 7 ~ "Máquina expreso",    
+      tipo_preparacion == 8 ~ "Otro",    
+      tipo_preparacion == 9 ~ "No sé"   
+    ),
+    tipo_bebida_cat = case_when(
+      tipo_bebida == 1 ~ "Tinto o americano",    
+      tipo_bebida == 2 ~ "Café con leche",   
+      tipo_bebida == 3 ~ "Capuchino",   
+      tipo_bebida == 4 ~ "Otro"
+    ), 
+    usafiltro_cat = case_when(
+      usafiltro == 1 ~ "Usa filtro",    
+      usafiltro == 0 ~ "No usa filtro"
+    ),
+    cant_cafe_cat = case_when(
+      cant_cafe == 1 ~ "Cuchara de Sopa 15gr",    
+      cant_cafe == 2 ~ "Cucharita de postre 5gr",
+      cant_cafe == 3 ~ "Cucharita de café o te 2gr",
+      cant_cafe == 4 ~ "No sé"
+    ), 
+    cant_cafe_cat = factor(cant_cafe_cat,  # ← corregido: cant_cafe_cat no cant_cafe
+      levels = c("Cuchara de Sopa 15gr",
+                 "Cucharita de postre 5gr",
+                 "Cucharita de café o te 2gr",
+                 "No sé")
+    ),
+    clase_cafe_cafeina_cat = case_when(
+      clase_cafe_cafeina == 1 ~ "Cafeinado o con cafeina",    
+      clase_cafe_cafeina == 2 ~ "Descafeinado o sin cafeina"
+    ),
+    add_endulzante_tipo_cat = case_when(
+      add_endulzante_tipo == 1 ~ "Azúcar - equivalentes",
+      add_endulzante_tipo == 2 ~ "Edulcorantes artificiales"
+    )
+  )
+
+# Tamaño taza 
+BASE1$cantidad_taza_cafe <- factor(BASE1$cantidad_taza_cafe, 
+                                    levels = c(1:4), 
+                                    labels = c("Expreso 60-80ml", "Pequeña 120-150ml", 
+                                               "Mediana 160-210ml", "Tipo Mug 250ml o >"))
+
+tabla4 <- BASE1 %>%
+  select(tiempoconsumo, frec_consumo, cantidad_taza_cafe, consumo_diario_std, 
+         tipo_preparacion_cat, usafiltro_cat, tipo_bebida_cat, tomatinto, 
+         clase_cafe_cafeina_cat, cant_cafe_cat, cucharadas_cafe, 
+         add_endulzante_sino, add_endulzante_tipo_cat, 
+         consumo_diario_std_3cat) %>%
+  tbl_summary(
+    by = consumo_diario_std_3cat,
+    type = list(
+      c(consumo_diario_std, cucharadas_cafe)  ~ "continuous2",   # ← continuas
+      c(tiempoconsumo, frec_consumo, cantidad_taza_cafe,
+        tipo_preparacion_cat, usafiltro_cat, tipo_bebida_cat, 
+        tomatinto, clase_cafe_cafeina_cat, cant_cafe_cat,
+        add_endulzante_sino, add_endulzante_tipo_cat)        ~ "categorical"  # ← categóricas
+    ),
+    label = list(
+      tiempoconsumo           ~ "Tiempo consumo",
+      frec_consumo            ~ "Frecuencia consumo",
+      cantidad_taza_cafe      ~ "Tamaño taza",
+      consumo_diario_std      ~ "Consumo diario std",
+      tipo_preparacion_cat    ~ "Tipo preparación",
+      tipo_bebida_cat         ~ "Tipo de bebida",      # ← corregido
+      usafiltro_cat           ~ "Uso filtro",          # ← corregido
+      tomatinto               ~ "Consumo tinto",
+      add_endulzante_sino ~ "Adición endulzante",  # ← corregido
+      add_endulzante_tipo_cat ~ "Tipo endulzante",     # ← corregido
+      cant_cafe_cat           ~ "Tamaño cuchara consumo café",  # ← corregido
+      cucharadas_cafe         ~ "Cucharadas de café",
+      clase_cafe_cafeina_cat  ~ "Clase café cafeína"   # ← corregido
+    ),
+    statistic = list(
+      all_continuous2() ~ c(                        # ← continuous2, no continuous
+        "{mean} ({sd})",
+        "{median} ({p25}, {p75})",
+        "{min} - {max}"
+      ),
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = list(
+      all_continuous()  ~ 2,
+      all_categorical() ~ 1
+    ),
+    missing = "ifany",
+    missing_text = "Sin dato"
+  ) %>%
+  add_p(
+    test = list(
+      all_continuous()  ~ "kruskal.test",
+      all_categorical() ~ "fisher.test"
+    ),
+    pvalue_fun = ~ style_pvalue(.x, digits = 3)
+  ) %>%
+  add_overall() %>%
+  modify_header(label ~ "**Variable**") %>%
+  bold_labels() %>%
+  bold_p(t = 0.05) %>%
+  modify_caption("**Tabla 5**")
+
+tabla4
+
+```
+
+### Respuestas no estructuradas - marca de café
+
+```{r}
+library(stringi)
+BASE1$marcacomercial_cafe<- BASE1$marcacomercial_cafe %>%
+  tolower() %>%                                    # minúsculas
+  stri_trans_general("Latin-ASCII") %>%            # quita acentos (á→a, é→e...)
+  gsub("[^a-z0-9 ]", "", .) %>%                    # quita puntos, símbolos, etc.
+  trimws()                  %>%                    # quita espacios al inicio/fin
+  gsub("\\s+", " ", .)      
+```
+
+```{r}
+BASE1 <- BASE1 %>%
+  mutate(
+    
+    # ── Variable 1: marca principal (primera detectada) ──
+    marca_principal = case_when(
+      grepl("sello rojo|sello ojo|selo rojo | seloo rojo| cafe sello rojo", marcacomercial_cafe)                                    ~ "Sello Rojo",
+      grepl("nescafe|nespresso|nestle", marcacomercial_cafe)                                           ~ "Nescafé",
+      grepl("juan valdez|juan valedez|juan veldez|juan vadez|juan valdes|juan vakdez", marcacomercial_cafe) ~ "Juan Valdez",
+      grepl("tostao|tostado|tostaooma|totao", marcacomercial_cafe)                                     ~ "Tostao",
+      grepl("colcafe|colcafeaguila|colocafe|clocade", marcacomercial_cafe)                             ~ "Colcafé",
+      grepl("oma|tostaooma", marcacomercial_cafe)                                                                ~ "OMA",
+      grepl("aguila roja|aguika roja|agulia roja|aguila rojacafe|cafe aguila roja", marcacomercial_cafe)                ~ "Águila Roja",
+      grepl("buen dia|buendia|alcosto buen dia", marcacomercial_cafe)                                  ~ "Buen Día",
+      grepl("viejo molino|molino viejo|viejo molina|d1|cafe del d1|d1 descafeinado|viejo molino instantaneo | viejo molino del d1 | viejo molina | cafe viejo molino ", marcacomercial_cafe)                             ~ "Viejo Molino- D1",
+      grepl("matiz", marcacomercial_cafe)                                                              ~ "Matiz",
+      grepl("bastilla|la bastilla", marcacomercial_cafe)                                               ~ "La Bastilla",
+      grepl("quindio|cafe quindio|gourmet quindio|gourmet el quindio", marcacomercial_cafe)            ~ "Quindío",
+      grepl("luker|lukafe|lukcafe|lucafe|luck cafe", marcacomercial_cafe)                              ~ "Luker",
+      grepl("organico|cafe organico|cachipai organico|origen cafe organico |cafe organico aguila roja | cafe organico especial | cafe organico juan valdez | cafe organico nescafe | cafe organico o especialidad | cafe organico san carlos | cafe organico tostao | afe natural de finca de paime cundinamarca", marcacomercial_cafe)      ~ "Café Orgánico",
+      grepl("monumental|monumenral", marcacomercial_cafe)                                              ~ "Monumental",
+      grepl("aroma", marcacomercial_cafe)                                                              ~ "Aroma",
+      grepl("amor perfecto|perfecto amor", marcacomercial_cafe)                                        ~ "Amor Perfecto",
+      grepl("cafeteria|cafe de cafeteria|de cafeteria|expreso de panaderia|crepes", marcacomercial_cafe) ~ "Cafetería",
+      grepl("carulla|carull|exito|frescampo|cafe del exito |cafe carulla", marcacomercial_cafe)                                                     ~ "Carulla-Éxito-Frescampo",
+      grepl("olimpica|marca de olimpica", marcacomercial_cafe)                                         ~ "Olímpica",
+      grepl("dolka", marcacomercial_cafe)                                                              ~ "Dolka",
+      grepl("pacundi", marcacomercial_cafe)                                                            ~ "Pacundí",
+      grepl("finca|cafe de finca|de la finca|caficultor|cafecultor", marcacomercial_cafe)              ~ "Café de Finca",
+      grepl("cocafe", marcacomercial_cafe)                                                             ~ "Cocafé",
+      grepl("pergamino|san alberto", marcacomercial_cafe)                                              ~ "Café Especial",
+      grepl("members selection|member selection|medalla de oro", marcacomercial_cafe)                  ~ "Members Selection",
+      grepl("segafredo", marcacomercial_cafe)                                                          ~ "Segafredo",
+      grepl("azahar|bemoca|chinchina|magistral|moka|muka|nacer|neocolony|
+             pingaro|premier|rocket|senderos|simarron|tradicion|universal|misiones|
+             colonial|origen|la loma|cafe alma pura|cafe las lajas|cafe valle|
+             cafe de medellin|cafe de prisma|cafe del huila|cafe huila|tres en uno|
+             mi cafe tu cafe|molido y recogido", marcacomercial_cafe)                                  ~ "Otra marca",
+      grepl("no se|no sabe|no recuerda|no tiene|del ara no recuerda|no tiene | del quindio no recuerda | del ara no recuerda el nombre", marcacomercial_cafe)    ~ "No recuerda",
+      TRUE ~ NA_character_
+    ),
+    
+    # ── Variable 2: consume una o varias marcas ──
+    n_marcas = case_when(
+      grepl("varias|varios|varias marcas", marcacomercial_cafe) ~ "Varias marcas",
+      # detectar si hay 2 o más marcas conocidas en el texto
+      (grepl("sello rojo|selo rojo|sello ojo", marcacomercial_cafe) +
+       grepl("nescafe|nestle", marcacomercial_cafe) +
+       grepl("juan valdez|juan valedez|juan veldez|juan vadez", marcacomercial_cafe) +
+       grepl("tostao|tostado", marcacomercial_cafe) +
+       grepl("colcafe|colocafe", marcacomercial_cafe) +
+       grepl("\\boma\\b", marcacomercial_cafe) +
+       grepl("aguila roja|aguika roja", marcacomercial_cafe) +
+       grepl("buen dia|buendia", marcacomercial_cafe) +
+       grepl("viejo molino|molino viejo", marcacomercial_cafe) +
+       grepl("matiz", marcacomercial_cafe) +
+       grepl("bastilla", marcacomercial_cafe) +
+       grepl("quindio", marcacomercial_cafe) +
+       grepl("luker|lukafe|lukcafe", marcacomercial_cafe) +
+       grepl("aroma", marcacomercial_cafe) +
+      grepl("carulla|carull|exito|frescampo", marcacomercial_cafe) +   
+       grepl("monumental", marcacomercial_cafe)) >= 2                              ~ "Varias marcas",
+      TRUE                                                                          ~ "Una marca"
+    )
+  )
+
+library(knitr)
+library(kableExtra)
+
+sort(table(BASE1$marca_principal), decreasing = TRUE) %>%
+  as.data.frame() %>%
+  rename(Marca = Var1, Frecuencia = Freq) %>%
+  mutate(Porcentaje = round(Frecuencia / sum(Frecuencia) * 100, 1),
+         Porcentaje = paste0(Porcentaje, "%")) %>%
+  kable(caption = "Distribución de marcas de café",
+        align = c("l", "c", "c")) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+    full_width = FALSE,
+    position = "center"
+  ) %>%
+  row_spec(0, bold = TRUE, background = "#4e79a7", color = "white") %>%
+  row_spec(1:3, bold = TRUE, background = "#d6e4f0")  # resalta top 3
+
+```
+
+#### Otra categoría
+
+```{r}
+# Ver qué quedó en "Otra"
+BASE1 %>%
+  filter(marca_principal == "Otra marca") %>%
+  count(marcacomercial_cafe, sort = TRUE) %>%
+  rename(`Marca original` = marcacomercial_cafe, 
+         Frecuencia = n) %>%
+  kable(caption = "Marcas sin clasificar (Otra)",
+        align = c("l", "c")) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE,
+    position = "center",
+    font_size = 13
+  ) %>%
+  row_spec(0, bold = TRUE, background = "#c0392b", color = "white") %>%
+  footnote(general = "Revisar",
+           general_title = "Nota:")
+
+
+```
+
+#### Número de marcas
+
+```{r}
+
+table(BASE1$n_marcas) %>%
+  as.data.frame() %>%
+  rename(`Consumo de marcas` = Var1, Frecuencia = Freq) %>%
+  mutate(Porcentaje = paste0(round(Frecuencia / sum(Frecuencia) * 100, 1), "%")) %>%
+  kable(caption = "Distribución por número de marcas consumidas",
+        align = c("l", "c", "c")) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE,
+    position = "center",
+    font_size = 13
+  ) %>%
+  row_spec(0, bold = TRUE, background = "#4e79a7", color = "white")
+
+
+```
+
+## Perfiles a nivel descriptivo (sin técnicas multivariadas o probabilísticas)
+
+
+```{r}
+#| column: screen
+#| fig-align: center    # ✅ centra el gráfico
+#| out-width: 70%
+
+library(dplyr)
+library(ggplot2)
+
+# ── Preparar datos ──
+
+
+BASE2 <- BASE1
+BASE2$consumo_diario_std_3cat[is.na(BASE1$consumo_diario_std_3cat)] <- "Consumo Ligero"
+BASE2 <- BASE2 %>%
+  filter(!is.na(imccat)) #4
+
+datos_sankey <- BASE2 %>%
+  select(edad_cat,imccat, dislipidemia, ante_tabaco,
+         auditc_catN, act_fisica, salt_add_2, consumo_diario_std_3cat) %>%
+  mutate(across(everything(), as.factor))
+
+library(forcats)
+
+datos_sankey <- datos_sankey %>%
+  mutate(
+    imccat = fct_recode(imccat,
+      "N" = "Normal",
+      "EP" = "Exceso de peso"
+    ),
+    auditc_catN = fct_recode(auditc_catN,
+      "Sin_riesgo" = "Consumo No riesgoso de alcohol",
+      "+Riesgo" = "Consumo riesgoso de alcohol"
+    ),
+    act_fisica = fct_recode(act_fisica,
+      "+act.f"  = "Cumple actividad física recomendada",
+      "-act.f" = "No cumple actividad física recomendada"
+    ),
+    consumo_diario_std_3cat = fct_recode(consumo_diario_std_3cat,
+      "Ligero"  = "Consumo Ligero",
+      "Moderado" = "Consumo Moderado",
+      "Alto" = "Consumo Alto"
+    )
+  ) %>% 
+  rename(EDAD = edad_cat, IMC = imccat, Dislipidemia = dislipidemia, Ant.tabaco = ante_tabaco, AUDITC = auditc_catN, Act.fisica = act_fisica, Sal = salt_add_2, Consumo_cafe = consumo_diario_std_3cat)
+
+
+BASE_transformado <- datos_sankey %>% group_by(EDAD, IMC, Dislipidemia, Ant.tabaco, AUDITC, Act.fisica, Sal, Consumo_cafe) %>% summarise(Freq = n()) %>% ungroup() 
+
+
+library(easyalluvial) 
+
+alluvial_wide( data = datos_sankey, 
+               max_variables = 8, fill_by = 'last_variable',
+               col_vector_flow = c("skyblue", "salmon", "#52b788"))
+```
+
+```{r}
+library(gt)
+BASE_transformado %>%
+  arrange(desc(Freq)) %>%       
+  gt() %>%
+  tab_header(title = "Conteos") %>%
+  cols_label_with(fn = toupper)
+```
+
+## Propuesta análisis Creación indicador
+
+```{r}
+# Se seleccionan las variables de análisis 
+
+BASE_CLASS <- BASE1 %>% select(record_id, consumo_diario_std_3cat , imccat, auditc_catN, ante_tabaco, tabaquismo, act_fisica, salt_add_2) %>% 
+  mutate(
+    tabaco_comb = case_when(
+      tabaquismo == "Si" | ante_tabaco == "Si" ~ 1,  # fuma o fumó
+      tabaquismo == "No" & ante_tabaco == "No" ~ 2,  # no fuma ni fumó
+      TRUE ~ NA_real_  # si alguna es NA
+    )
+  )
+
+BASE_CLASS <- BASE_CLASS %>%
+  mutate(
+    cafe_s = ifelse(consumo_diario_std_3cat == "Consumo Moderado", 2, 1),
+    imc_s  = ifelse(imccat == "Normal", 2, 1),
+    alcohol_s = ifelse(auditc_catN == "Consumo No riesgoso de alcohol", 2, 1),
+    actfis_s  = ifelse(act_fisica == "Cumple actividad física recomendada", 2, 1),
+    sal_s  = ifelse(salt_add_2 == "No", 2, 1)
+  )
+
+
+BASE_CLASS <- BASE_CLASS %>%
+  mutate(
+    # convertir a 0/1
+    cafe_s2      = cafe_s - 1,
+    imc_s2       = imc_s - 1,
+    alcohol_s2   = alcohol_s - 1,
+    actfis_s2    = actfis_s - 1,
+    tabaco_comb2 = tabaco_comb - 1,
+    sal_s2       = sal_s - 1,
+    
+    # suma total cumplidas
+    n_cumple = cafe_s2 + imc_s2 + alcohol_s2 + 
+               actfis_s2 + tabaco_comb2 + sal_s2,
+    
+    # proporción de cumplimiento
+    prop_cumplimiento = n_cumple / 6
+  )
+
+library(gt)
+tabla_prop <- BASE_CLASS %>%
+  count(prop_cumplimiento) %>%
+  mutate(
+    conductas  = paste0(round(prop_cumplimiento * 6), "/6"),
+    porcentaje = round(n / sum(n) * 100, 1)
+  ) %>%
+  rename(
+    "Proporción"          = prop_cumplimiento,
+    "Conductas cumplidas" = conductas,
+    "N"                   = n,
+    "%"                   = porcentaje
+  ) %>%
+  gt() %>%
+  tab_header(title = "Distribución de cumplimiento del goldstandar saludable") %>%
+  fmt_number(columns = "Proporción", decimals = 2) %>%
+  cols_align(align = "center") %>%
+  tab_style(
+    style     = cell_text(weight = "bold"),
+    locations = cells_column_labels()
+  )
+
+tabla_prop
+
+
+```
+
+#### Intersección de cumplimiento de conductas
+
+```{r}
+#| column: screen
+#| out-width: 80%
+library(limma)
+library(UpSetR)
+
+BASE_UPSET <- as.data.frame(cbind(
+  "Cafe.moderado"       = BASE_CLASS$cafe_s2,
+  "IMC.normal"          = BASE_CLASS$imc_s2,
+  "Alcohol.bajo.riesgo" = BASE_CLASS$alcohol_s2,
+  "Actividad.fisica"    = BASE_CLASS$actfis_s2,
+  "No.tabaco"           = BASE_CLASS$tabaco_comb2,
+  "Sin.sal"             = BASE_CLASS$sal_s2
+))
+
+BASE_UPSET <- na.omit(BASE_UPSET)
+
+# Asegurar que sean 0 y 1
+BASE_UPSET <- as.data.frame(lapply(BASE_UPSET, as.integer))
+
+upset(
+  BASE_UPSET,
+  order.by        = "freq",
+  nsets           = 6,
+  nintersects     = 24,
+  matrix.color    = "#085041",
+  main.bar.color  = "#1D9E75",
+  sets.bar.color  = "#5DCAA5",
+  mainbar.y.label = "Frecuencia de intersección",
+  sets.x.label    = "Frecuencia total",
+  point.size      = 3.5,
+  line.size       = 0.8,
+  text.scale      = c(1.4, 1.2, 1.1, 1.1, 1.3, 1.1),
+  shade.color     = "#E1F5EE",
+  shade.alpha     = 0.6,
+  set_size.show   = TRUE,
+  group.by        = "degree",
+  scale.intersections = "identity",
+  scale.sets          = "identity"
+)
+
+
+
+```
+
+#### Frecuencia y cumplimiento de cada conducta saludable
+
+```{r}
+library(knitr)
+library(kableExtra)
+vars <- c("cafe_s2", "imc_s2", "alcohol_s2", "actfis_s2", "tabaco_comb2", "sal_s2")
+nombres <- c("Café moderado", "IMC normal", "Alcohol bajo riesgo", 
+             "Actividad física", "No tabaco", "Sin sal añadida")
+freqs <- BASE_CLASS %>%
+  summarise(across(c(cafe_s2, imc_s2, alcohol_s2, actfis_s2, tabaco_comb2, sal_s2),
+                   ~ sum(. == 1, na.rm = TRUE))) %>%
+  as.numeric()
+props <- BASE_CLASS %>%
+  summarise(across(c(cafe_s2, imc_s2, alcohol_s2, actfis_s2, tabaco_comb2, sal_s2),
+                   ~ sum(. == 1, na.rm = TRUE) / sum(!is.na(.)))) %>%
+  as.numeric()
+tabla_final <- data.frame(
+  Conducta    = nombres,
+  n         = freqs,
+  Proporción = paste0(round(props * 100, 1), "%")
+)
+tabla_final %>%
+  kable(
+    caption = "Frecuencia y proporción de cumplimiento de cada conducta saludable",
+    align   = c("l", "c", "c"),
+    format  = "html",
+    col.names = c("Conducta saludable", "n", "%")
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+    full_width        = FALSE,
+    position          = "center",
+    font_size         = 14
+  ) %>%
+  row_spec(0, bold = TRUE, background = "
+#1D9E75", color = "white")
+```
+
+#### Representación gráfica
+
+**Radar 1**
+
+```{r}
+#| column: screen
+#| out-width: 75%
+
+
+#devtools::install_github("ricardo-bion/ggradar")
+
+library(ggradar)
+library(ggplot2)
+library(dplyr)
+
+datos_radar <- data.frame(
+  group    = "Muestra total\n(n = 1,643)",
+  cafe     = 27.4,
+  imc      = 28.6,
+  alcohol  = 99.1,
+  actfis   = 16.1,
+  tabaco   = 90.3,
+  sal      = 88.0
+)
+
+ggradar(
+  datos_radar,
+  values.radar     = c("0%", "50%", "100%"),
+  grid.min         = 0,
+  grid.mid         = 50,
+  grid.max         = 100,
+  group.colours    = "#1D9E75",
+  background.circle.colour = "white",
+  gridline.min.colour      = "grey80",
+  gridline.mid.colour      = "grey80",
+  gridline.max.colour      = "grey80",
+  axis.labels      = c("Café moderado", "IMC normal", "Alcohol\nbajo riesgo",
+                       "Actividad física", "No tabaco", "Sin sal añadida"),
+  axis.label.size  = 3.5,
+  group.point.size = 4,
+  group.line.width = 1.2,
+  fill             = TRUE,
+  fill.alpha       = 0.12,
+  legend.position  = "bottom"
+) +
+  labs(caption = "Proporción de cumplimiento de cada conducta saludable. n = 1,643 consumidores de café.") +
+  theme(
+    plot.caption = element_text(size = 9, color = "grey50", hjust = 0.5)
+  )
+```
+
+**Radar 2**
+
+```{r}
+#| column: screen
+#| out-width: 75%
+library(fmsb)
+
+datos_radar <- data.frame(
+  cafe    = 27.4,
+  imc     = 28.6,
+  alcohol = 99.1,
+  actfis  = 16.1,
+  tabaco  = 90.3,
+  sal     = 88.0
+)
+
+datos_plot <- rbind(
+  rep(100, 6),
+  rep(0,   6),
+  datos_radar
+)
+
+colnames(datos_plot) <- c("Café\nmoderado", "IMC\nnormal", "Alcohol\nbajo riesgo",
+                           "Actividad\nfísica", "No\ntabaco", "Sin sal\nañadida")
+
+par(mar = c(1, 1, 1, 1))
+
+radarchart(
+  datos_plot,
+  axistype    = 1,
+  pcol        = "#1D9E75",
+  pfcol       = scales::alpha("#1D9E75", 0.15),
+  plwd        = 3,
+  plty        = 1,
+  cglcol      = "grey80",
+  cglty       = 1,
+  cglwd       = 0.8,
+  axislabcol  = "grey55",
+  vlcex       = 1.0,
+  calcex      = 1
+)
+
+
+
+```
+
+**Polar**
+
+```{r}
+#| column: screen
+#| out-width: 80%
+datos_bar <- data.frame(
+  conducta   = c("Café moderado", "IMCnormal", "Alcoholbajo riesgo",
+                 "Actividad física", "No tabaco", "Sin sal añadida"),
+  proporcion = c(27.4, 28.6, 99.1, 16.1, 90.3, 88.0),
+  n          = c(450, 469, 1629, 264, 1483, 1446)
+)
+
+datos_bar$conducta <- factor(datos_bar$conducta, levels = datos_bar$conducta)
+
+ggplot(datos_bar, aes(x = conducta, y = proporcion, fill = proporcion)) +
+  geom_col(width = 0.8, color = "white", linewidth = 0.4) +
+  geom_text(aes(label = paste0(proporcion, "%")),
+            hjust = -0.2, size = 3.5, color = "grey30") +
+  scale_fill_gradient(low = "#9FE1CB", high = "#085041") +
+  scale_y_continuous(limits = c(0, 130)) +  # <- más espacio
+  coord_polar(theta = "x") +
+  labs(
+    title   = "Proporción de cumplimiento de cada conducta saludable"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x     = element_text(size = 9, color = "grey30",
+                                   margin = margin(t = 5)),  # <- espacio extra
+    axis.text.y     = element_blank(),
+    axis.title      = element_blank(),
+    panel.grid      = element_line(color = "grey90", linewidth = 0.3),
+    legend.position = "none",
+    plot.title      = element_text(size = 12, hjust = 0.5),
+    plot.caption    = element_text(size = 9, color = "grey50", hjust = 0.5),
+    plot.margin     = margin(0, 0, 0, 0)  # <- márgenes generosos
+  )
+```
+
+#### Verificando la calidad del indicador
+
+**Correlación entre variables**
+
+-   ¿Podría ser realizado un Análisis factorial exploratorio (AFE)?
+-   ¿Se está analizando variables redundantes?
+
+```{r}
+#| column: screen
+#| out-width: 80%
+library(psych)
+datos_tetra <- as.data.frame(cbind(
+  cafe    = BASE_CLASS$cafe_s2,
+  imc     = BASE_CLASS$imc_s2,
+  alcohol = BASE_CLASS$alcohol_s2,
+  actfis  = BASE_CLASS$actfis_s2,
+  tabaco  = BASE_CLASS$tabaco_comb2,
+  sal     = BASE_CLASS$sal_s2
+)) %>% na.omit()
+
+vars <- c("cafe", "imc", "alcohol", "actfis", "tabaco", "sal")
+
+# Sacar phi para cada par
+phi_pares <- combn(vars, 2, simplify = FALSE) %>%
+  lapply(function(par) {
+    tab <- table(datos_tetra[[par[1]]], datos_tetra[[par[2]]])
+    p   <- phi(tab, digits = 3)
+    data.frame(
+      var1  = par[1],
+      var2  = par[2],
+      phi   = round(p, 3)
+    )
+  }) %>%
+  bind_rows()
+
+
+library(corrplot)
+
+# Construir matriz completa desde phi_pares
+vars <- c("cafe", "imc", "alcohol", "actfis", "tabaco", "sal")
+n <- length(vars)
+
+phi_mat <- matrix(1, nrow = n, ncol = n, dimnames = list(vars, vars))
+
+for (i in 1:nrow(phi_pares)) {
+  r <- which(vars == phi_pares$var1[i])
+  c <- which(vars == phi_pares$var2[i])
+  phi_mat[r, c] <- phi_pares$phi[i]
+  phi_mat[c, r] <- phi_pares$phi[i]
+}
+
+# Nombres bonitos
+rownames(phi_mat) <- c("Café moderado", "IMC normal", "Alcohol bajo riesgo",
+                        "Actividad física", "No tabaco", "Sin sal añadida")
+colnames(phi_mat) <- rownames(phi_mat)
+
+# Mapa de calor
+corrplot(
+  phi_mat,
+  method      = "color",
+  type        = "full",
+  col         = colorRampPalette(c("#D85A30", "#F0997B", "#F1EFE8",
+                                    "#9FE1CB", "aquamarine3"))(200),
+  addCoef.col = "black",
+  number.cex  = 1,
+  tl.col      = "black",
+  tl.srt      = 90,
+  tl.cex      = 1,
+  cl.cex      = 1,
+  diag        = TRUE,
+  title       = "Coeficientes phi entre conductas saludables",
+  mar         = c(0, 0, 2, 0)
+)
+
+```
+
+**Se revisan los intervalos de confianza**
+
+```{r}
+library(ufs)
+library(knitr)
+library(kableExtra)
+
+n_muestra <- nrow(datos_tetra)
+
+phi_ic <- phi_pares %>%
+  mutate(
+    li = sapply(phi, function(r) confIntR(r = r, N = n_muestra)[[1]]),
+    ls = sapply(phi, function(r) confIntR(r = r, N = n_muestra)[[2]])
+  ) %>%
+  mutate(across(c(phi, li, ls), ~ round(., 3))) %>%
+  rename(
+    "Conducta 1"  = var1,
+    "Conducta 2"  = var2,
+    "Phi"         = phi,
+    "LI 95%"      = li,
+    "LS 95%"      = ls
+  )
+
+phi_ic %>%
+  kable(
+    caption = "Coeficientes phi con intervalos de confianza al 95%",
+    align   = c("l", "l", "c", "c", "c"),
+    format  = "html"
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+    full_width        = FALSE,
+    position          = "center",
+    font_size         = 13
+  ) %>%
+  row_spec(0, bold = TRUE, background = "#085041", color = "white") %>%
+  row_spec(which(abs(phi_ic$Phi) == max(abs(phi_ic$Phi))),
+           bold = TRUE, background = "#E1F5EE")
+
+```
+
+**Obtención del KMO** Indicador de adecuación muestral para ejecutar un AFE
+
+```{r}
+
+KMO(phi_mat)
+```
+
+## Modelo multivariado RIESGO CARDIOVASCULAR
+
+### Modelo 1
+
+```{r}
+m1 <- glm (riesgo_card_cat2b ~ consumo_diario_std_cat+ hta_diab2 + tiempoconsumo + usafiltro_f + auditc_catN + add_endulzante_sino + act_fisica + tomatinto, family = "binomial", data= BASEini)
+
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+
+tbl_regression(m1, exponentiate = TRUE, add_estimate_to_reference_rows=TRUE)  %>% add_global_p()
+
+```
+
+### Modelo 2
+
+```{r}
+m2 <- glm (riesgo_card_cat2b ~ consumo_diario_std_cat+ hta_diab2 + tiempoconsumo + usafiltro_f + auditc_catN + add_endulzante_sino + act_fisica + tomatinto + salt_add_2+ otros_med_1+ imccat+ antec_fam + perimetro_abdominal_cat, family = "binomial", data= BASEini)
+
+tbl_regression(m2, exponentiate = TRUE, add_estimate_to_reference_rows=TRUE)  %>% add_global_p()
+
+```
+
+### Modelo 3
+
+Solo en consumidores de cafe, encontradno variables con un valor p \<= 0.2
+
+```{r}
+
+BASE2 <- BASE2 %>%
+  rename(
+    Sulfonilureas               = tratamiento_dm_2,
+    Biguanidas                  = tratamiento_dm_2,
+    Tiazolidinedionas           = tratamiento_dm_3,
+    Meglitinidas                = tratamiento_dm_4,
+    Inhibidores_laalfa_glucosidasa = tratamiento_dm_5,
+    Analog_laamilina              = tratamiento_dm_6,
+    Inhib._laDPP4                  = tratamiento_dm_7,
+    Inhib._SGLT2                 = tratamiento_dm_8,
+    Agonistas_receptor_GLP1     = tratamiento_dm_9,
+    Agonistas_receptorGIP_GLP1  = tratamiento_dm_10,
+    Insulinas                   = tratamiento_dm_11,
+    Acido_Acetil_Salicilico     = otros_med_1,
+    Analgesico                  = otros_med_2,
+    Antiuricemico               = otros_med_3,
+    otro_med                    = otros_med_6
+  )
+
+cols_med <- c("Biguanidas", "Tiazolidinedionas", "Meglitinidas", "Inhibidores_laalfa_glucosidasa", "Analog_laamilina", "Inhib._laDPP4", "Inhib._SGLT2", "Agonistas_receptor_GLP1", "Agonistas_receptorGIP_GLP1",  "Insulinas", "otro_medicamento", "Acido_Acetil_Salicilico", "Analgesico", "Antiuricemico", "otro_med")
+
+# Crear versión con Si/No para tabla descriptiva
+BASE2 <- BASE2 %>%
+  mutate(across(all_of(cols_med), 
+                ~ factor(ifelse(. == 1, "Si", "No"), levels = c("Si", "No"))))
+
+
+
+tabla_bivariada <- BASE2 %>%
+  select(edad, edad_cat, sexo_2, estrato_cat, estado_civil_cat, imccat,
+         perimetro_abdominal_cat, hta_diab2, forma_tto,
+         dislipidemia, alg_enf, antec_fam, ta_sisto, ta_diast,
+         control_ta, hemoglobina_glucosilada, auditc_catN, ante_tabaco,
+         tabaquismo, act_fisica, salt_add_2, Biguanidas, Tiazolidinedionas, 
+         Inhibidores_laalfa_glucosidasa, Inhib._laDPP4, Inhib._SGLT2, 
+         Agonistas_receptor_GLP1, Insulinas, otro_medicamento, 
+         Acido_Acetil_Salicilico, Analgesico, Antiuricemico, otro_med, 
+         consumo_diario_std_3cat, tiempoconsumo, frec_consumo, cantidad_taza_cafe, 
+         consumo_diario_std, tipo_preparacion_cat, usafiltro_cat, tipo_bebida_cat, 
+         tomatinto, clase_cafe_cafeina_cat, cant_cafe_cat, cucharadas_cafe,
+         add_endulzante_sino, add_endulzante_tipo_cat,
+         riesgo_card_cat2) %>%
+  tbl_summary(
+    by = riesgo_card_cat2,
+    type = list(
+      c(edad, ta_sisto, ta_diast, consumo_diario_std, cucharadas_cafe) ~ "continuous2",
+      c(edad_cat, sexo_2, estrato_cat, estado_civil_cat, imccat,
+        perimetro_abdominal_cat, hta_diab2, forma_tto, dislipidemia, 
+        alg_enf, antec_fam, control_ta, hemoglobina_glucosilada, 
+        auditc_catN, ante_tabaco, tabaquismo, act_fisica, salt_add_2,
+        Biguanidas, Tiazolidinedionas, Inhibidores_laalfa_glucosidasa,
+        Inhib._laDPP4, Inhib._SGLT2, Agonistas_receptor_GLP1, Insulinas,
+        otro_medicamento, Acido_Acetil_Salicilico, Analgesico, Antiuricemico,
+        otro_med, consumo_diario_std_3cat, tiempoconsumo, frec_consumo, 
+        cantidad_taza_cafe, tipo_preparacion_cat, usafiltro_cat, tipo_bebida_cat,
+        tomatinto, clase_cafe_cafeina_cat, cant_cafe_cat,
+        add_endulzante_sino, add_endulzante_tipo_cat) ~ "categorical"
+    ),
+    statistic = list(
+      all_continuous2() ~ c(
+        "{mean} ({sd})",
+        "{median} ({p25}, {p75})",
+        "{min} - {max}"
+      ),
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = list(
+      all_continuous()  ~ 2,
+      all_categorical() ~ 1
+    ),
+    missing = "ifany",
+    missing_text = "Sin dato"
+  ) %>%
+  add_p(
+    test = list(
+      all_continuous()  ~ "wilcox.test",
+      all_categorical() ~ "fisher.test"
+    ),                                              # ← cierre correcto de add_p
+    pvalue_fun = ~ style_pvalue(.x, digits = 3)
+  ) %>%                                             # ← cierre correcto del %>%
+  add_overall() %>%
+  modify_header(label ~ "**Variable**") %>%
+  bold_labels() %>%
+  bold_p(t = 0.05) %>%
+  modify_caption("**Tabla bivariada - Riesgo cardiovascular**")
+
+tabla_bivariada
+
+```
+
+Se seleccionan al modelo las variables
+
+```{r}
+
+# Convertir character a factor en BASE1
+vars_a_factor_BASE2 <- c("estado_civil_cat", "forma_tto", "alg_enf", "antec_fam",
+                          "control_ta", "auditc_catN", "ante_tabaco", "tabaquismo", 
+                          "salt_add_2", "tiempoconsumo", "Acido_Acetil_Salicilico", "otro_med")
+
+BASE2 <- BASE2 %>%
+  mutate(across(all_of(vars_a_factor_BASE2), factor))
+
+# Lo mismo para BASEini
+BASE2 <- BASE2 %>%
+  mutate(across(all_of(vars_a_factor_BASE2), factor))
+
+# Verificar cuál sigue siendo character
+sapply(BASE2[vars_a_factor_BASE2], class)
+m3 <- glm (riesgo_card_cat2b ~ edad_cat + sexo_2 + estrato_cat + estado_civil_cat + imccat+ hta_diab2 + forma_tto + alg_enf + antec_fam + ta_sisto + ta_diast + control_ta +  auditc_catN + ante_tabaco + salt_add_2 + Acido_Acetil_Salicilico + otro_med + tiempoconsumo + cant_cafe_cat + add_endulzante_sino + consumo_diario_std_3cat, family = "binomial", data= BASE2)
+
+summary(m3)
+
+```
+
+```{r}
+# 1. Crear base sin NAs solo con las variables del modelo
+vars_m3 <- c("riesgo_card_cat2b", "edad_cat", "sexo_2", "estrato_cat", 
+             "estado_civil_cat", "imccat", "hta_diab2", "alg_enf", "antec_fam", "ta_sisto", "ta_diast", "control_ta", "auditc_catN", "ante_tabaco", 
+             "salt_add_2", "Acido_Acetil_Salicilico", "otro_med", 
+             "tiempoconsumo", "cant_cafe_cat", "add_endulzante_sino", 
+             "consumo_diario_std_3cat")
+
+BASE2_completa <- BASE2 %>%
+  dplyr::select(all_of(vars_m3)) %>%
+  filter(complete.cases(.))
+
+cat("Observaciones completas:", nrow(BASE2_completa), "\n")
+cat("Observaciones eliminadas:", nrow(BASE2) - nrow(BASE2_completa), "\n")
+
+cat("Observaciones completas:", nrow(BASE2_completa), "\n")
+cat("Observaciones eliminadas:", nrow(BASE2) - nrow(BASE2_completa), "\n")
+
+# 2. Reajustar modelos con la base completa
+m3 <- glm(riesgo_card_cat2b ~ edad_cat + sexo_2 + estrato_cat + 
+          estado_civil_cat + imccat + hta_diab2 + alg_enf + 
+          antec_fam + ta_sisto + ta_diast + control_ta +  
+          auditc_catN + ante_tabaco + salt_add_2 + Acido_Acetil_Salicilico + 
+          otro_med + tiempoconsumo + cant_cafe_cat + add_endulzante_sino + 
+          consumo_diario_std_3cat,
+          family = "binomial", data = BASE2_completa)
+
+m_minimo <- glm(riesgo_card_cat2b ~ consumo_diario_std_3cat,
+                family = "binomial", data = BASE2_completa)
+
+# 3. Stepwise
+library(MASS)
+m3_step <- stepAIC(m3,
+                   scope = list(lower = m_minimo, upper = m3),
+                   direction = "both",
+                   trace = TRUE)
+
+summary(m3_step)
+formula(m3_step)
+```
+
+```{r}
+
+m4 <- glm(riesgo_card_cat2b ~ edad_cat + sexo_2 + estado_civil_cat + ta_sisto + ante_tabaco + 
+    add_endulzante_sino + consumo_diario_std_3cat,  family = "binomial", data = BASE2_completa)
+summary(m4)
+```
+
+```{r}
+tbl_regression(m4, exponentiate = TRUE, add_estimate_to_reference_rows=TRUE)  %>% add_global_p()
+```
+
+### Comparando los modelos
+
+```{r}
+tab_model(m1, m2, m_minimo, m3, m4,
+          show.aic    = TRUE,
+          show.loglik = TRUE,
+          show.fstat  = TRUE,
+          show.r2     = TRUE,
+          show.dev    = TRUE,
+          show.aicc   = TRUE,
+          show.ngroups = TRUE,   # N por grupo
+          show.obs    = TRUE,    # N observaciones
+          show.se     = TRUE,    # errores estándar
+          show.ci     = 0.95,    # intervalo de confianza
+          show.p      = TRUE,    # p-valores
+          p.style     = "stars", # o "numeric" para ver el valor exacto
+          transform   = "exp",   # ← OR en lugar de log-odds (clave para logístico)
+          col.order   = c("est", "ci", "se", "p"),
+          dv.labels   = c("Modelo completo todos",
+                          "Modelo reducido todos", 
+                          "Modelo nulo solo cafe",
+                          "Modelo completo solo café", 
+                          "Modelo reducido solo café"))
+```
+
+```{r}
+
+# Variables de m2 (o m3/m4, el que tenga 483 obs)
+vars_modelo <- c("riesgo_card_cat2b", "edad_cat", "sexo_2", "estrato_cat", 
+                 "estado_civil_cat", "imccat", "hta_diab2",  "alg_enf", "antec_fam", "ta_sisto", "ta_diast", "control_ta",  "auditc_catN", "ante_tabaco", "salt_add_2", "Acido_Acetil_Salicilico", "otro_med", "tiempoconsumo", "cant_cafe_cat", "add_endulzante_sino",  "consumo_diario_std_3cat")
+
+# Contar NAs por variable
+BASE2 %>%
+  dplyr::select(all_of(vars_modelo)) %>%
+  summarise(across(everything(), ~ sum(is.na(.)))) %>%
+  tidyr::pivot_longer(everything(), 
+                      names_to = "variable", 
+                      values_to = "n_NA") %>%
+  arrange(desc(n_NA)) %>%
+  filter(n_NA > 0) %>%                    # solo las que tienen NAs
+  mutate(pct = round(n_NA / nrow(BASE2) * 100, 1)) %>%  # agregar porcentaje
+  kable(col.names = c("Variable", "N con dato perdido", "%"),
+        caption = "Datos perdidos por variable") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE) %>%            # encabezado en negrita
+  column_spec(2, color = ifelse(          # colorear según magnitud
+    BASE2 %>%
+      dplyr::select(all_of(vars_modelo)) %>%
+      summarise(across(everything(), ~ sum(is.na(.)))) %>%
+      tidyr::pivot_longer(everything(), names_to = "variable", values_to = "n_NA") %>%
+      arrange(desc(n_NA)) %>%
+      filter(n_NA > 0) %>%
+      pull(n_NA) > 100, "red", "black"))
+
+```
+
+```{r}
+BASE2 %>%
+  dplyr::select(record_id, all_of(vars_modelo)) %>%
+  mutate(across(-record_id, as.character)) %>%   # ← convierte todo a character
+  tidyr::pivot_longer(-record_id, 
+                      names_to = "variable", 
+                      values_to = "valor") %>%
+  filter(is.na(valor)) %>%
+  group_by(variable) %>%
+  summarise(
+    n_faltantes = n(),
+    ids = paste(record_id, collapse = ", ")
+  ) %>%
+  arrange(desc(n_faltantes)) %>%
+  kable(col.names = c("Variable", "N faltantes", "IDs con dato perdido"),
+        caption = "IDs con dato perdido por variable") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE) %>%
+  column_spec(3, width = "50em")
+```
+
+```{r}
+library(lmtest)
+lrtest(m3, m4)
+
+```
+
+```{r}
+library(ResourceSelection)
+hoslem.test(m4$y, fitted(m4), g=10)
+```
